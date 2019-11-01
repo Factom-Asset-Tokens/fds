@@ -61,44 +61,46 @@ A block of the data.
 ### Writing a data store
 
 1. Compute the Chain ID
-    i.   Compute the total data size. `len(data)`
-    ii.  Compute the number of Data Block Entries. `len(data)/(10240 - 32 - 2)`
-    iii. Compute the hash of the data. `sha256d(data)`
-    iv.  Append any application metadata.
-    v.   Construct the ExtIDs of the First Entry.
-    vi.  Compute the ChainID `sha256(sha256(ExtID[0])|sha256(ExtID[1])|...|sha256(ExtID[n]))`
+    - Compute the total data size. `len(data)`
+    - Compute the number of Data Block Entries. `len(data)/(10240 - 32 - 2)`
+    - Compute the hash of the data. `sha256d(data)`
+    - Append any application metadata.
+    - Construct the ExtIDs of the First Entry.
+    - Compute the ChainID
+      `sha256(sha256(ExtID[0])|sha256(ExtID[1])|...|sha256(ExtID[n]))`
 
 2. Build the Data Block Entries
-    i.   Construct `len(data)/32` (`+1` if `len(data)%32 > 0`) Entries.
-    ii.  Sequentially fill the Content of the Entries with the data, and
-populate the ChainID.
-    iii. Construct the linked list by traversing the Entries in reverse order
-to set up the `ExtID[0]` and compute the Entry Hashes.
-    iv.  Set the Content of the first entry to the first Data Block Entry Hash
-in the linked list.
+    - Construct `len(data)/32` (`+1` if `len(data)%32 > 0`) Entries.
+    - Sequentially fill the Content of the Entries with the data, and populate
+      the ChainID.
+    - Construct the linked list by traversing the Entries in reverse order to
+      set up the `ExtID[0]` and compute the Entry Hashes.
+    -  Set the Content of the first entry to the first Data Block Entry Hash in
+       the linked list.
 
 3. Publish the data store
-    i.   Commit the first entry, and then commit all data block entries.
-    ii.  Wait for ACK for all Commits.
-    iii. Reveal all entries.
+    - Commit the first entry, and then commit all data block entries.
+    - Wait for ACK for all Commits.
+    - Reveal all entries.
 
 ### Reading a data store
 
 1. Validate the data store chain structure and metadata.
-    i.   Using a known Data Store Chain ID, download the First Entry.
-    ii.  Validate the protocol and version.
-    iii. Ensure that the file is not too big or does not span too many Data
-Block Entries for the client.
-    iv.  If known, validate the declared data hash and size.
-    v.   Apply any application specific validation rules for the metadata.
+    - Using a known Data Store Chain ID, download the First Entry.
+    - Validate the protocol and version.
+    - Ensure that the file is not too big or does not span too many Data Block
+      Entries for the client.
+    - If known, validate the declared data hash and size.
+    - Apply any application specific validation rules for the metadata.
 
 2. Reconstruct the data.
-    i. Starting from the first Data Block Entry from the First Entry Content,
-traverse the linked list, and concatenate the Content to reconstruct the data.
-    ii. Proceed with traversal until the declared data size or number of Data
-Block Entries reached, or until there is no subsequent Data Block Entry
+    - Starting from the first Data Block Entry from the First Entry Content,
+      traverse the linked list, and concatenate the Content to reconstruct the
+data.
+    - Continue traversal until the declared data size or number of Data Block
+      Entries reached, or until there is no subsequent Data Block Entry
 declared.
 
 3. Validate the data.
-    i.  Validate the declared file size and number of Data Block Entries.
-    ii. Compute and validate the declared file hash.
+    - Validate the declared file size and number of Data Block Entries.
+    - Compute and validate the declared file hash.

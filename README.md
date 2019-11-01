@@ -33,9 +33,9 @@ Content of the first entry, not the ExtIDs.
 |-----|---------- |--------------------------------------------------------------------------------|
 | 0   | string    | "data-store",  A human readable marker that defines this data protocol.        |
 | 1   | varInt\_F | Version Number of the "data-store" protocol. Currently 0 (1 byte)              |
-| 2   | varInt\_F | Total data size.                                                               |
-| 2   | varInt\_F | Total number of Data Block Entries.                                            |
-| 3   | Bytes32   | The sha256d hash of the data.                                                  |
+| 2   | varInt\_F | Total data size. Must be greater than 0.                                       |
+| 3   | varInt\_F | Total number of Data Block Entries. Must be greater than 0.                    |
+| 4   | Bytes32   | The sha256d hash of the data.                                                  |
 | ... | (any)     | Any number of additional ExtIDs may be defined by the application as metadata. |
 
 #### Content
@@ -53,6 +53,7 @@ not to fill the Entry to capacity.
 | i   | Type      | Description                                                                    |
 |-----|---------- |--------------------------------------------------------------------------------|
 | 0   | Bytes32   | The Entry Hash of the next Data Block Entry, if it exists, otherwise no ExtIDs.|
+| ... | (any)     | Any number of additional ExtIDs may be defined by the application as metadata. |
 
 #### Content
 

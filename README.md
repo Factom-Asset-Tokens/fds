@@ -52,7 +52,7 @@ not to fill the Entry to capacity.
 #### ExtIDs
 | i   | Type      | Description                                                                    |
 |-----|---------- |--------------------------------------------------------------------------------|
-| 0   | Bytes32   | The Entry Hash of the next Data Block Entry, if it exists, otherwise no ExtIDs.|
+| 0   | Bytes32   | The Entry Hash of the next Data Block Entry, if it exists.                     |
 | ... | (any)     | Any number of additional ExtIDs may be defined by the application as metadata. |
 
 #### Content

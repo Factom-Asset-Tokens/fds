@@ -155,6 +155,14 @@ const (
 	MaxLinkedDBIEHashCount = (factom.EntryMaxDataLen - 32 - 2) / 32
 )
 
+// GetData downloads all Data Block Index and Data Block Entries required to
+// reconstruct the on chain data, and then decompresses the data if necessary
+// before writing it to the given data io.Writer.
+//
+// The Data Block Entries are downloaded concurrently as they are loaded from
+// the DBI.
+//
+// The sha256d hash of the data written to data, is verified.
 func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer) error {
 
 	// Get the on-chain size.

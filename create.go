@@ -10,7 +10,7 @@ import (
 	"github.com/Factom-Asset-Tokens/factom"
 )
 
-// Generate a set of Data Store Chain Entries for the data read from cData.
+// Create a set of Data Store Chain Entries for the data read from cData.
 //
 // The data from cData may be compressed using zlib or gzip, and if so,
 // compression must be initialized with the correct Format and Size. See
@@ -27,7 +27,7 @@ import (
 //
 // The returned Entry list may be submitted to Factom in any order so long as
 // the first entry is submitted first as the chain creation entry.
-func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
+func Create(ctx context.Context, c *factom.Client, es factom.EsAddress,
 	cData io.Reader, compression *Compression,
 	size uint64, dataHash *factom.Bytes32,
 	appMetadata json.RawMessage, appNamespace ...factom.Bytes) (

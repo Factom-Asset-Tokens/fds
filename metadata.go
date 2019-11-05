@@ -182,11 +182,11 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	// downloaded concurrently.
 	cData := make([]byte, size)
 
-	// dbEs will contain all Data Block Entries.
+	// Pass along the Data Block Entries from the DBI to this channel.
 	dbEs := make(chan factom.Entry, dbCount)
 
-	// Download the Data Block Entries concurrently, as we parse their
-	// Entry Hashes from the DBI.
+	// Download and process the Data Block Entries concurrently as they are
+	// parsed from the DBI, which is downloaded below.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	g, ctx := errgroup.WithContext(ctx)
@@ -213,14 +213,14 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 		})
 	}
 
+	// Download the DBI linked list and populate the Data Block Entry Hashes.
+
 	// dbiBuf will hold the Content of the current DBI Entry.
 	dbiBuf := bytes.NewBuffer(nil)
 
 	// dbiEHash holds the Entry Hash for the next DBI Entry in the Linked
 	// List.
 	dbiEHash := *m.DBIStart
-
-	// Download the DBI linked list and populate the Data Block Entry Hashes.
 
 	for i := 0; i < dbCount; i++ {
 		// If we have no Data Block Hashes to parse, download and
@@ -287,6 +287,7 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	}
 	close(dbEs)
 
+	// Wait until all Data Block Entries are processed.
 	if err := g.Wait(); err != nil {
 		return err
 	}

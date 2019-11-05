@@ -177,6 +177,34 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	// dbEs will contain all Data Block Entries.
 	dbEs := make(chan factom.Entry, dbCount)
 
+	// Download the Data Block Entries concurrently, as we parse their
+	// Entry Hashes from the DBI.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	g, ctx := errgroup.WithContext(ctx)
+	for i := 0; i < runtime.NumCPU(); i++ {
+		g.Go(func() error {
+			for dbE := range dbEs {
+				origCap := cap(dbE.Content)
+				if err := dbE.Get(ctx, c); err != nil {
+					return err
+				}
+				// Ensure that the Content did not exceed the
+				// original capacity of the underlying cData
+				// slice, and that the Content is filled to
+				// capacity of either the underlying cData
+				// slice, or the Entry limit.
+				if cap(dbE.Content) != origCap ||
+					(len(dbE.Content) < factom.EntryMaxDataLen &&
+						len(dbE.Content) != cap(dbE.Content)) {
+					return fmt.Errorf(
+						"invalid Data Block Entry Content")
+				}
+			}
+			return nil
+		})
+	}
+
 	// dbiBuf will hold the Content of the current DBI Entry.
 	dbiBuf := bytes.NewBuffer(nil)
 
@@ -251,31 +279,6 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	}
 	close(dbEs)
 
-	// Download the Data Blocks concurrently.
-	dbEC := make(chan factom.Entry)
-	g, ctx := errgroup.WithContext(ctx)
-	for i := 0; i < runtime.NumCPU(); i++ {
-		g.Go(func() error {
-			for dbE := range dbEC {
-				origCap := cap(dbE.Content)
-				if err := dbE.Get(ctx, c); err != nil {
-					return err
-				}
-				// Ensure that the Content did not exceed the
-				// original capacity of the underlying cData
-				// slice, and that the Content is filled to
-				// capacity of either the underlying cData
-				// slice, or the Entry limit.
-				if cap(dbE.Content) != origCap ||
-					(len(dbE.Content) < factom.EntryMaxDataLen &&
-						len(dbE.Content) != cap(dbE.Content)) {
-					return fmt.Errorf(
-						"invalid Data Block Entry Content")
-				}
-			}
-			return nil
-		})
-	}
 	if err := g.Wait(); err != nil {
 		return err
 	}

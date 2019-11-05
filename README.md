@@ -19,6 +19,7 @@ and then downloaded concurrently.
 before downloading a file.
 - Censorship resistent - Commit all entries before revealing any to ensure that
   a data store cannot be censored.
+- Optional compression - Use gzip, zlib, or none.
 
 ## Specification
 

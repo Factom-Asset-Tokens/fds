@@ -10,13 +10,13 @@ import (
 	"github.com/Factom-Asset-Tokens/factom"
 )
 
-// Create a set of Data Store Chain Entries for the data read from cData.
+// Generate a set of Data Store Chain Entries for the data read from cData.
 //
 // The data from cData may be compressed using zlib or gzip, and if so,
 // compression must be initialized with the correct Format and Size. See
 // Compression for more details.
 //
-// The given size must be the uncompressed size of the data.
+// The size must be the size of the uncompressed data.
 //
 // The given dataHash must be the sha256d hash of the uncompressed data.
 //
@@ -25,124 +25,155 @@ import (
 // is appended to the ExtIDs of the First Entry and so must be known, along
 // with the dataHash, for a client to recompute the ChainID.
 //
-// The returned Entry list may be submitted to Factom in any order so long as
-// the first entry is submitted first as the chain creation entry.
-func Create(ctx context.Context, c *factom.Client, es factom.EsAddress,
+// The new Data Store chainID is returned, along with the commits and reveals
+// required to create the Data Store Chain, and the totalCost in Entry Credits
+// of creating the Data Store.
+func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 	cData io.Reader, compression *Compression,
-	size uint64, dataHash *factom.Bytes32,
+	dataSize uint64, dataHash *factom.Bytes32,
 	appMetadata json.RawMessage, appNamespace ...factom.Bytes) (
-	factom.Bytes32, error) {
 
-	m := Metadata{
-		DataHash:    dataHash,
-		Size:        size,
-		Compression: compression,
-		AppMetadata: appMetadata,
-	}
+	chainID factom.Bytes32,
+	commits, reveals []factom.Bytes,
+	totalCost uint,
+	err error) {
+
+	// Compute Data Store ChainID.
 	nameIDs := NameIDs(dataHash, appNamespace...)
-	chainID := factom.ComputeChainID(nameIDs)
+	chainID = factom.ComputeChainID(nameIDs)
 
+	// size of the data written to the chain.
+	size := dataSize
 	if compression != nil {
 		size = compression.Size
 	}
 
+	// Read all cData into a Buffer.
 	cDataBuf := bytes.NewBuffer(make([]byte, 0, size))
-
 	n, err := cDataBuf.ReadFrom(cData)
 	if err != nil {
-		return factom.Bytes32{}, err
+		return factom.Bytes32{}, nil, nil, 0, err
 	}
 	if n != int64(size) {
-		return factom.Bytes32{}, fmt.Errorf("invalid size")
+		return factom.Bytes32{}, nil, nil, 0, fmt.Errorf("invalid size")
 	}
 
-	// Compute the expected DB Entry Count.
+	// Compute the expected Data Block Entry Count.
 	dbECount := int(size / factom.EntryMaxDataLen)
 	if size%factom.EntryMaxDataLen > 0 {
 		dbECount++
 	}
 
-	// Compute the expected DBI Entry Count
+	// Compute the expected Data Block Index Entry Count
 	dbiECount := dbECount / MaxLinkedDBIEHashCount
 	if dbECount%MaxLinkedDBIEHashCount > (MaxDBIEHashCount - MaxLinkedDBIEHashCount) {
 		dbiECount++
 	}
+	totalECount := 1 + dbiECount + dbECount
 
-	entries := make(map[factom.Bytes32]factom.Bytes, dbiECount+dbECount)
+	// We return the commit and reveal data so that users of the library
+	// don't need to regenerate them.
+	commits = make([]factom.Bytes, totalECount)
+	reveals = make([]factom.Bytes, totalECount)
+
+	// The raw DBI, the concatenation of all Data Block Entry Hashes.
 	dbi := make([]byte, dbECount*32)
 
-	e := factom.Entry{ChainID: &chainID}
 	// Generate all Data Blocks and the DBI
 	for i := 0; i < dbECount; i++ {
+		e := factom.Entry{ChainID: &chainID}
 		e.Content = cDataBuf.Next(factom.EntryMaxDataLen)
 
-		data, err := e.MarshalBinary()
+		reveal, err := e.MarshalBinary()
 		if err != nil {
-			return factom.Bytes32{}, err
+			return factom.Bytes32{}, nil, nil, 0, err
 		}
 
-		hash := factom.ComputeEntryHash(data)
+		cost, _ := factom.EntryCost(len(reveal), false)
+		totalCost += uint(cost)
+
+		hash := factom.ComputeEntryHash(reveal)
+
+		commit, _ := factom.GenerateCommit(es, reveal, &hash, false)
+
 		copy(dbi[i*32:], hash[:])
-		entries[hash] = data
+
+		reveals[1+dbiECount+i] = reveal
+		commits[1+dbiECount+i] = commit
 	}
 
+	// nDBHash is the number of trailing Data Block Entry Hashes from the
+	// end of the DBI to include in the last entry. We populate the DBI
+	// Entries in reverse order for creation of the linked list.
 	nDBHash := dbECount % MaxLinkedDBIEHashCount
 	if nDBHash <= 2 {
 		nDBHash += MaxLinkedDBIEHashCount
 	}
+
+	// dbiI is the starting byte index of the dbi that we will include in
+	// the last DBI Entry.
 	dbiI := len(dbi) - (nDBHash * 32)
-	var hash factom.Bytes32
-	m.DBIStart = &hash
-	for i := 0; i < dbiECount; i++ {
-		e.Content = dbi[dbiI:]
 
-		dbi = dbi[:dbiI]
-		dbiI -= MaxLinkedDBIEHashCount * 32
+	var dbiStart factom.Bytes32
+	for i := dbiECount; i > 0; i-- {
+		e := factom.Entry{ChainID: &chainID}
 
-		data, err := e.MarshalBinary()
-		if err != nil {
-			return factom.Bytes32{}, err
+		if !dbiStart.IsZero() {
+			e.ExtIDs = []factom.Bytes{dbiStart[:]}
 		}
 
-		hash = factom.ComputeEntryHash(data)
-		entries[hash] = data
+		e.Content = dbi[dbiI:]
+		dbi = dbi[:dbiI]
 
-		e.ExtIDs = []factom.Bytes{hash[:]}
+		dbiI -= MaxLinkedDBIEHashCount * 32
+
+		reveal, err := e.MarshalBinary()
+		if err != nil {
+			return factom.Bytes32{}, nil, nil, 0, err
+		}
+
+		cost, _ := factom.EntryCost(len(reveal), false)
+		totalCost += uint(cost)
+
+		dbiStart = factom.ComputeEntryHash(reveal)
+
+		commit, _ := factom.GenerateCommit(es, reveal, &dbiStart, false)
+
+		reveals[i] = reveal
+		commits[i] = commit
 	}
 
-	data, err := json.Marshal(m)
-	if err != nil {
-		return factom.Bytes32{}, err
+	// Initialize Metadata for what will be the first entry.
+	m := Metadata{
+		Version:     Version,
+		DataHash:    dataHash,
+		Size:        dataSize,
+		Compression: compression,
+		AppMetadata: appMetadata,
+		DBIStart:    &dbiStart,
 	}
 
 	firstE := factom.Entry{
 		ChainID: &chainID,
 		ExtIDs:  nameIDs,
-		Content: data,
+	}
+	firstE.Content, err = json.Marshal(m)
+	if err != nil {
+		return factom.Bytes32{}, nil, nil, 0, err
 	}
 
 	reveal, err := firstE.MarshalBinary()
 	if err != nil {
-		return factom.Bytes32{}, err
+		return factom.Bytes32{}, nil, nil, 0, err
 	}
-	firstHash := factom.ComputeEntryHash(data)
-	commit, _ := factom.GenerateCommit(es, reveal, &firstHash, true)
-	if err := c.Commit(ctx, commit); err != nil {
-		return factom.Bytes32{}, err
-	}
-	if err := c.Reveal(ctx, reveal); err != nil {
-		return factom.Bytes32{}, err
-	}
+	hash := factom.ComputeEntryHash(reveal)
+	commit, _ := factom.GenerateCommit(es, reveal, &hash, true)
 
-	for hash, reveal := range entries {
-		commit, _ := factom.GenerateCommit(es, reveal, &hash, false)
-		if err := c.Commit(ctx, commit); err != nil {
-			return factom.Bytes32{}, err
-		}
-		if err := c.Reveal(ctx, reveal); err != nil {
-			return factom.Bytes32{}, err
-		}
-	}
+	cost, _ := factom.EntryCost(len(reveal), true)
+	totalCost += uint(cost)
 
-	return chainID, nil
+	commits[0] = commit
+	reveals[0] = reveal
+
+	return chainID, commits, reveals, totalCost, nil
 }

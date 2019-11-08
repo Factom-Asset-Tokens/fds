@@ -66,7 +66,8 @@ func NameIDs(dataHash *factom.Bytes32, namespace ...factom.Bytes) []factom.Bytes
 	return append([]factom.Bytes{[]byte(Protocol), dataHash[:]}, namespace...)
 }
 
-func Get(ctx context.Context, c *factom.Client,
+// Lookup the Metadata for a given Data Store chainID.
+func Lookup(ctx context.Context, c *factom.Client,
 	chainID *factom.Bytes32) (Metadata, error) {
 
 	// Get the first Entry in the Chain...
@@ -84,10 +85,11 @@ func Get(ctx context.Context, c *factom.Client,
 	}
 
 	// Parse the First Entry and return the Metadata or any error.
-	return New(firstE)
+	return ParseEntry(firstE)
 }
 
-func New(e factom.Entry) (Metadata, error) {
+// ParseEntry attempts to parse e as the First Entry from a Data Store Chain.
+func ParseEntry(e factom.Entry) (Metadata, error) {
 
 	// Validate and parse ExtIDs
 
@@ -106,7 +108,7 @@ func New(e factom.Entry) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("ExtIDs[1]: invalid data hash length")
 	}
 	var dataHash factom.Bytes32
-	copy(dataHash[:], e.ExtIDs[4])
+	copy(dataHash[:], e.ExtIDs[1])
 
 	// Parse the JSON.
 	md := Metadata{DataHash: &dataHash, Entry: e}
@@ -155,15 +157,15 @@ const (
 	MaxLinkedDBIEHashCount = (factom.EntryMaxDataLen - 32 - 2) / 32
 )
 
-// GetData downloads all Data Block Index and Data Block Entries required to
-// reconstruct the on chain data, and then decompresses the data if necessary
-// before writing it to the given data io.Writer.
+// Download all Data Block Index and Data Block Entries required to reconstruct
+// the on chain data, and then decompresses the data if necessary before
+// writing it to the given data io.Writer.
 //
 // The Data Block Entries are downloaded concurrently as they are loaded from
 // the DBI.
 //
 // The sha256d hash of the data written to data, is verified.
-func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer) error {
+func (m Metadata) Download(ctx context.Context, c *factom.Client, data io.Writer) error {
 
 	// Get the on-chain size.
 	size := m.Size
@@ -172,9 +174,9 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	}
 
 	// Compute the expected DB Count.
-	dbCount := int(size / factom.EntryMaxDataLen)
+	totalDBCount := int(size / factom.EntryMaxDataLen)
 	if size%factom.EntryMaxDataLen > 0 {
-		dbCount++
+		totalDBCount++
 	}
 
 	// cData will contain the on chain data. We preallocate this so that we
@@ -183,10 +185,13 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	cData := make([]byte, size)
 
 	// Pass along the Data Block Entries from the DBI to this channel.
-	dbEs := make(chan factom.Entry, dbCount)
+	dbEs := make(chan factom.Entry, totalDBCount)
 
 	// Download and process the Data Block Entries concurrently as they are
 	// parsed from the DBI, which is downloaded below.
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	g, ctx := errgroup.WithContext(ctx)
@@ -222,7 +227,7 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 	// List.
 	dbiEHash := *m.DBIStart
 
-	for i := 0; i < dbCount; i++ {
+	for i := 0; i < totalDBCount; i++ {
 		// If we have no Data Block Hashes to parse, download and
 		// validate the next DBI Entry.
 		if dbiBuf.Len() == 0 {
@@ -243,7 +248,7 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 
 			// remaining is the number of Data Block Hashes that
 			// still need to be parsed or downloaded.
-			remaining := len(dbEs) - i
+			remaining := totalDBCount - i
 
 			// If there are more remaining than can fit in a single
 			// DBI Entry...
@@ -266,6 +271,7 @@ func (m Metadata) GetData(ctx context.Context, c *factom.Client, data io.Writer)
 			} else if dbCount != remaining {
 				// Otherwise this DBI Entry must include all
 				// remaining DB Hashes.
+				fmt.Println("dbi E", i, dbCount, remaining)
 				return fmt.Errorf("invalid DBI Entry Content")
 			}
 

@@ -34,6 +34,7 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 	appMetadata json.RawMessage, appNamespace ...factom.Bytes) (
 
 	chainID factom.Bytes32,
+	txIDs, entryHashes []factom.Bytes32,
 	commits, reveals []factom.Bytes,
 	totalCost uint,
 	err error) {
@@ -52,10 +53,10 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 	cDataBuf := bytes.NewBuffer(make([]byte, 0, size))
 	n, err := cDataBuf.ReadFrom(cData)
 	if err != nil {
-		return factom.Bytes32{}, nil, nil, 0, err
+		return factom.Bytes32{}, nil, nil, nil, nil, 0, err
 	}
 	if n != int64(size) {
-		return factom.Bytes32{}, nil, nil, 0, fmt.Errorf("invalid size")
+		return factom.Bytes32{}, nil, nil, nil, nil, 0, fmt.Errorf("invalid size")
 	}
 
 	// Compute the expected Data Block Entry Count.
@@ -73,6 +74,8 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 
 	// We return the commit and reveal data so that users of the library
 	// don't need to regenerate them.
+	txIDs = make([]factom.Bytes32, totalECount)
+	entryHashes = make([]factom.Bytes32, totalECount)
 	commits = make([]factom.Bytes, totalECount)
 	reveals = make([]factom.Bytes, totalECount)
 
@@ -86,7 +89,7 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 
 		reveal, err := e.MarshalBinary()
 		if err != nil {
-			return factom.Bytes32{}, nil, nil, 0, err
+			return factom.Bytes32{}, nil, nil, nil, nil, 0, err
 		}
 
 		cost, _ := factom.EntryCost(len(reveal), false)
@@ -94,10 +97,11 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 
 		hash := factom.ComputeEntryHash(reveal)
 
-		commit, _ := factom.GenerateCommit(es, reveal, &hash, false)
+		commit, txID := factom.GenerateCommit(es, reveal, &hash, false)
 
 		copy(dbi[i*32:], hash[:])
-
+		txIDs[1+dbiECount+i] = txID
+		entryHashes[1+dbiECount+i] = hash
 		reveals[1+dbiECount+i] = reveal
 		commits[1+dbiECount+i] = commit
 	}
@@ -129,7 +133,7 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 
 		reveal, err := e.MarshalBinary()
 		if err != nil {
-			return factom.Bytes32{}, nil, nil, 0, err
+			return factom.Bytes32{}, nil, nil, nil, nil, 0, err
 		}
 
 		cost, _ := factom.EntryCost(len(reveal), false)
@@ -137,8 +141,10 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 
 		dbiStart = factom.ComputeEntryHash(reveal)
 
-		commit, _ := factom.GenerateCommit(es, reveal, &dbiStart, false)
+		commit, txID := factom.GenerateCommit(es, reveal, &dbiStart, false)
 
+		txIDs[i] = txID
+		entryHashes[i] = dbiStart
 		reveals[i] = reveal
 		commits[i] = commit
 	}
@@ -159,21 +165,23 @@ func Generate(ctx context.Context, c *factom.Client, es factom.EsAddress,
 	}
 	firstE.Content, err = json.Marshal(m)
 	if err != nil {
-		return factom.Bytes32{}, nil, nil, 0, err
+		return factom.Bytes32{}, nil, nil, nil, nil, 0, err
 	}
 
 	reveal, err := firstE.MarshalBinary()
 	if err != nil {
-		return factom.Bytes32{}, nil, nil, 0, err
+		return factom.Bytes32{}, nil, nil, nil, nil, 0, err
 	}
 	hash := factom.ComputeEntryHash(reveal)
-	commit, _ := factom.GenerateCommit(es, reveal, &hash, true)
+	commit, txID := factom.GenerateCommit(es, reveal, &hash, true)
 
 	cost, _ := factom.EntryCost(len(reveal), true)
 	totalCost += uint(cost)
 
+	txIDs[0] = txID
+	entryHashes[0] = hash
 	commits[0] = commit
 	reveals[0] = reveal
 
-	return chainID, commits, reveals, totalCost, nil
+	return chainID, txIDs, entryHashes, commits, reveals, totalCost, nil
 }
